@@ -31,11 +31,12 @@ import operator
 from django.db import models
 from django.core.exceptions import FieldError, ImproperlyConfigured
 from django.core.paginator import Paginator, InvalidPage
-from django.utils import simplejson as json
+from django.core import serializers 
 from django.utils.encoding import smart_str
 from django.http import Http404
-from util.json import json_encode
+import json
 
+django_json = serializers.get_serializer('json')()
 
 class JqGrid(object):
     queryset = None
@@ -187,12 +188,17 @@ class JqGrid(object):
 
     def get_json(self, request):
         paginator, page, items = self.get_items(request)
-        return json_encode({
+        items = self.to_array(items)
+        data = {
             'page': page.number,
             'total': paginator.num_pages,
             'rows': items,
             'records': paginator.count
-        })
+        }
+        return json.dumps(data)
+
+    def to_array(self, items):
+        return [item for item in items]
 
     def get_default_config(self):
         config = {
@@ -237,7 +243,7 @@ class JqGrid(object):
             'colModel': self.get_colmodels(),
         })
         if as_json:
-            config = json_encode(config)
+            config = json.dumps(config)
         return config
 
     def lookup_foreign_key_field(self, options, field_name):
