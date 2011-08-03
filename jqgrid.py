@@ -34,6 +34,7 @@ from django.core.paginator import Paginator, InvalidPage
 from django.core import serializers 
 from django.utils.encoding import smart_str
 from django.http import Http404
+from decimal import Decimal
 import json
 
 django_json = serializers.get_serializer('json')()
@@ -88,12 +89,14 @@ class JqGrid(object):
             except ValueError:
                 return None
 
-            if filters is None:
+            import pdb
+            pdb.set_trace()
+            if filters is None or filters == '':
                 field = request.GET.get('searchField')
                 op = request.GET.get('searchOper')
                 data = request.GET.get('searchString')
 
-                if all([field, op, data]):
+                if all([field, op]):
                     filters = {
                         'groupOp': 'AND',
                         'rules': [{ 'op': op, 'field': field, 'data': data }]
@@ -195,7 +198,7 @@ class JqGrid(object):
             'rows': items,
             'records': paginator.count
         }
-        return json.dumps(data)
+        return json.dumps(data, cls = DecimalEncoder)
 
     def to_array(self, items):
         return [item for item in items]
@@ -287,3 +290,10 @@ class JqGrid(object):
             'editable': True
         }
         return colmodel
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if (isinstance(obj, Decimal)):
+            return str(Decimal).replace('.',',')
+        return json.JSONEncoder.default(self, obj)
+
