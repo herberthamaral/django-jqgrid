@@ -89,8 +89,6 @@ class JqGrid(object):
             except ValueError:
                 return None
 
-            import pdb
-            pdb.set_trace()
             if filters is None or filters == '':
                 field = request.GET.get('searchField')
                 op = request.GET.get('searchOper')
