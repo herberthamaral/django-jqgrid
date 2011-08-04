@@ -29,7 +29,8 @@
 
 import operator
 from django.db import models
-from django.core.exceptions import FieldError, ImproperlyConfigured
+from django.core.exceptions import FieldError, ImproperlyConfigured,\
+        ValidationError
 from django.core.paginator import Paginator, InvalidPage
 from django.core import serializers 
 from django.utils.encoding import smart_str
@@ -50,8 +51,10 @@ class JqGrid(object):
     url = None
     caption = None
     colmodel_overrides = {}
+    request = None
 
-    def get_queryset(self, request):
+    def get_queryset(self):
+        request = self.request
         if hasattr(self, 'queryset') and self.queryset is not None:
             queryset = self.queryset._clone()
         elif hasattr(self, 'model') and self.model is not None:
@@ -71,14 +74,16 @@ class JqGrid(object):
             raise ImproperlyConfigured("No queryset or model defined.")
         return model
 
-    def get_items(self, request):
-        items = self.get_queryset(request)
-        items = self.filter_items(request, items)
-        items = self.sort_items(request, items)
-        paginator, page, items = self.paginate_items(request, items)
+    def get_items(self):
+        request = self.request
+        items = self.get_queryset()
+        items = self.filter_items(items)
+        items = self.sort_items(items)
+        paginator, page, items = self.paginate_items(items)
         return (paginator, page, items)
 
-    def get_filters(self, request):
+    def get_filters(self):
+        request = self.request
         _search = request.GET.get('_search')
         filters = None
 
@@ -101,10 +106,11 @@ class JqGrid(object):
                     }
         return filters
 
-    def filter_items(self, request, items):
+    def filter_items(self, items):
         # TODO: Add option to use case insensitive filters
         # TODO: Add more support for RelatedFields (searching and displaying)
         # FIXME: Validate data types are correct for field being searched.
+        request = self.request
         filter_map = {
             # jqgrid op: (django_lookup, use_exclude)
             'ne': ('%(field)s__exact', True),
@@ -122,7 +128,7 @@ class JqGrid(object):
             'ew': ('%(field)s__endswith', False),
             'cn': ('%(field)s__contains', False)
         }
-        _filters = self.get_filters(request)
+        _filters = self.get_filters()
         if _filters is None:
             return items
 
@@ -152,7 +158,8 @@ class JqGrid(object):
             filters = reduce(operator.iand, q_filters)
         return items.filter(filters)
 
-    def sort_items(self, request, items):
+    def sort_items(self, items):
+        request = self.request
         sidx = request.GET.get('sidx')
         if sidx is not None:
             sord = request.GET.get('sord')
@@ -163,16 +170,17 @@ class JqGrid(object):
                 pass
         return items
 
-    def get_paginate_by(self, request):
-        rows = request.GET.get('rows', 10)
+    def get_paginate_by(self):
+        rows = self.request.GET.get('rows', 10)
         try:
             paginate_by = int(rows)
         except ValueError:
             paginate_by = 10
         return paginate_by
 
-    def paginate_items(self, request, items):
-        paginate_by = self.get_paginate_by(request)
+    def paginate_items(self, items):
+        request = self.request
+        paginate_by = self.get_paginate_by()
         if not paginate_by:
             return (None, None, items)
 
@@ -188,7 +196,8 @@ class JqGrid(object):
         return (paginator, page, page.object_list)
 
     def get_json(self, request):
-        paginator, page, items = self.get_items(request)
+        self.request = request
+        paginator, page, items = self.get_items()
         items = self.to_array(items)
         data = {
             'page': page.number,
@@ -289,9 +298,57 @@ class JqGrid(object):
         }
         return colmodel
 
+    def handle_edit(self, request):
+        self.request = request
+        self.validate_edit_data()
+        form = self.fill_form()
+
+        if not form.is_valid():
+            return_data = {'ok':False, 'errors': form.errors}
+        else:
+            if request.POST['oper'] == 'del':
+                self.entry.delete()
+                return_data = {'ok': True}
+            else:
+                entry = form.save()
+                return_data = {'ok': True, 'id': entry.id }
+
+        return json.dumps(return_data)
+
+    def validate_edit_data(self):
+        request = self.request
+        if request.method != 'POST':
+            raise ValidationError('This method only handle POST requests')
+
+        self.is_edit_op = request.POST['oper'] in ('edit', 'del')
+
+        if not request.POST.has_key('id') and self.is_edit_op:
+            raise ValidationError('Missing object pk')
+        if request.POST['oper'] not in ('edit', 'del', 'add'):
+            raise ValidationError('Unknown operation')
+
+        if self.is_edit_op:
+            obj_id = request.POST['id']
+            entry = self.get_model().objects.filter(id = obj_id)
+            if entry.__len__() == 0 and request.POST['oper'] in ('edit', 'del'):
+                raise ValidationError('There is no such object with id %s'%obj_id)
+            self.entry = entry[0]
+
+    def fill_form(self):
+        data = self.request.POST
+        if self.is_edit_op:
+            obj_id = self.request.POST['id']
+            entry = self.entry
+            for field in self.get_field_names():
+                if field not in data:
+                    data[field] = getattr(entry, field)
+            form = self.form(data, instance = entry)
+        else:
+            form = self.form(data)
+        return form
+
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
         if (isinstance(obj, Decimal)):
-            return str(Decimal).replace('.',',')
+            return str(obj).replace('.',',')
         return json.JSONEncoder.default(self, obj)
-
