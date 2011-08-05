@@ -1,7 +1,7 @@
 from django.test import TestCase
 import fudge
 from jqgrid import JqGrid
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ValidationError, ImproperlyConfigured
 from django.contrib.auth.models import User
 from django.forms import ModelForm
 import json
@@ -26,18 +26,30 @@ class JqGridTest(TestCase):
         filters = self.jqgrid.get_filters()
         self.assertNotEquals(0,filters['rules'].__len__())
 
+
     def test_it_should_not_handle_get_requests_in_edit(self):
         """JqGrid sends insert, edit and delete via post requests"""
         self.request.method = 'GET'
+        self.jqgrid.form = UserForm
         try:
             self.jqgrid.handle_edit(self.request)
             self.fail('It should raise an validation error')
         except ValidationError:
             pass
 
+    def test_it_should_raise_exception_if_theres_no_form_at_edit(self):
+        self.request.method = 'POST'
+        try:
+            self.jqgrid.handle_edit(self.request)
+            self.fail('ImproperlyConfigured sould be raised at this point')
+        except ImproperlyConfigured:
+            pass
+
+
     def test_it_should_raise_an_validation_error_on_unknown_op(self):
         self.request.method = 'POST'
         self.request.POST = {'oper': 'invalid_op'}
+        self.jqgrid.form = UserForm
         try:
             self.jqgrid.handle_edit(self.request)
             self.fail('It should raise an validation error')
@@ -46,6 +58,7 @@ class JqGridTest(TestCase):
     def test_it_should_raises_validation_error_at_edit_delete_with_noid(self):
         self.request.method = 'POST'
         self.request.POST = {'oper': 'edit'}
+        self.jqgrid.form = UserForm
         try:
             self.jqgrid.handle_edit(self.request)
             self.fail('It should raise an validation error')
@@ -56,6 +69,7 @@ class JqGridTest(TestCase):
         self.request.method = 'POST'
         self.request.POST = {'oper': 'edit', 'id': 999, 'name': 'tehname'}
         self.jqgrid.model = User
+        self.jqgrid.form = UserForm
         try:
             self.jqgrid.handle_edit(self.request)
             self.fail('It should raise an validation error')
@@ -121,6 +135,24 @@ class JqGridTest(TestCase):
         user2 = User.objects.filter(id = 2)
         self.assertEquals(0, len(user2))
 
+    def test_it_should_not_make_the_ids_editable_by_default(self):
+        self.request.method = 'GET'
+        self.request.GET = {}
+        self.jqgrid.form = UserForm
+        self.jqgrid.model = User
+        config = json.loads(self.jqgrid.get_config(self.request))
+        col_id = config['colModel'][0]
+        self.assertTrue(col_id['index'] == 'id' and col_id['editable'] == False)
+
+    def test_it_should_return_the_right_field_type_based_on_form(self):
+        self.request.method = 'GET'
+        self.jqgrid.form = UserForm
+        self.jqgrid.model = User
+        self.request.GET = {}
+        config = json.loads(self.jqgrid.get_config(self.request))
+        self.assertEquals('text', config['colModel'][0]['edittype'])
+        self.assertEquals('text', config['colModel'][1]['edittype'])
+        self.assertEquals('checkbox', config['colModel'][8]['edittype'])
 
 class UserForm(ModelForm):
     class Meta:

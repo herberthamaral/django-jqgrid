@@ -35,6 +35,7 @@ from django.core.paginator import Paginator, InvalidPage
 from django.core import serializers 
 from django.utils.encoding import smart_str
 from django.http import Http404
+from django import forms
 from decimal import Decimal
 import json
 
@@ -52,6 +53,8 @@ class JqGrid(object):
     caption = None
     colmodel_overrides = {}
     request = None
+    form = None
+    custom_widgets = {}
 
     def get_queryset(self):
         request = self.request
@@ -245,6 +248,9 @@ class JqGrid(object):
         return self.caption
 
     def get_config(self, as_json=True):
+        if self.form is None:
+            msg = 'No form defined'
+            raise ImproperlyConfigured(msg)
         config = self.get_default_config()
         config.update(self.extra_config)
         config.update({
@@ -277,11 +283,33 @@ class JqGrid(object):
             (field, model, direct, m2m) = self.lookup_foreign_key_field(opts, field_name)
             colmodel = self.field_to_colmodel(field, field_name)
             override = self.colmodel_overrides.get(field_name)
-
             if override:
                 colmodel.update(override)
+            self.get_edit_info_from_field(colmodel, field_name)
             colmodels.append(colmodel)
         return colmodels
+
+    def get_edit_info_from_field(self, colmodel, field_name):
+        self.custom_widgets.update({
+                forms.widgets.CheckboxInput: 'checkbox',
+                forms.widgets.DateInput: 'text',
+                forms.widgets.DateTimeInput: 'text',
+                forms.widgets.HiddenInput: 'hidden',
+                forms.widgets.PasswordInput: 'password',
+                forms.widgets.RadioInput: 'radio',
+                forms.widgets.TextInput: 'text',
+                forms.widgets.Select: 'select',
+                forms.widgets.FileInput: 'file',
+                forms.widgets.Textarea: 'textarea',
+                })
+        widget_equivalence_table = self.custom_widgets
+        try:
+            widget = self.form().fields[field_name].widget
+            field = widget.__class__
+            colmodel['edittype'] = widget_equivalence_table[field]
+            colmodel['editoptions'] = widget.attrs
+        except KeyError:
+            colmodel['edittype'] = 'text'
 
     def get_field_names(self):
         fields = self.fields
@@ -290,15 +318,20 @@ class JqGrid(object):
         return fields
 
     def field_to_colmodel(self, field, field_name):
+        editable = not isinstance(field, models.fields.AutoField)
         colmodel = {
             'name': field_name,
             'index': field.name,
-            'label': field.verbose_name,
-            'editable': True
+            'label': field.verbose_name if type(field.verbose_name) == str else field.verbose_name.__unicode__(),
+            'editable': editable 
         }
         return colmodel
 
     def handle_edit(self, request):
+        if self.form is None:
+            msg = 'No form defined'
+            raise ImproperlyConfigured(msg)
+
         self.request = request
         self.validate_edit_data()
         form = self.fill_form()
