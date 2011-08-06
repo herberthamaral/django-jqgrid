@@ -248,9 +248,7 @@ class JqGrid(object):
         return self.caption
 
     def get_config(self, as_json=True):
-        if self.form is None:
-            msg = 'No form defined'
-            raise ImproperlyConfigured(msg)
+        self.must_have_form()
         config = self.get_default_config()
         config.update(self.extra_config)
         config.update({
@@ -308,13 +306,31 @@ class JqGrid(object):
             field = widget.__class__
             colmodel['edittype'] = widget_equivalence_table[field]
             colmodel['editoptions'] = widget.attrs
+            self.get_editoptions_from_field(colmodel, field_name)
         except KeyError:
             colmodel['edittype'] = 'text'
+
+    def get_editoptions_from_field(self, colmodel, field_name):
+        model_field = [f for f in self.get_model()._meta.fields if f.name==field_name]
+        choices = dict(model_field[0].choices)
+        colmodel['editoptions']['value'] = {}
+        if choices.__len__() > 0:
+            for c in choices.keys():
+                colmodel['editoptions']['value'][c] = choices[c]
+        #look for foreign key
+        if model_field[0].rel is not None:
+            related_model = model_field[0].rel.to
+            choices = related_model.objects.all()
+            for c in choices:
+                colmodel['editoptions']['value'][str(c.id)] = str(c)
+
+        if colmodel['editoptions']['value'] == {}:
+            del colmodel['editoptions']['value']
 
     def get_field_names(self):
         fields = self.fields
         if not fields:
-            fields = [f.name for f in self.get_model()._meta.local_fields]
+            fields = [f.name for f in self.get_model()._meta.fields]
         return fields
 
     def field_to_colmodel(self, field, field_name):
@@ -328,10 +344,7 @@ class JqGrid(object):
         return colmodel
 
     def handle_edit(self, request):
-        if self.form is None:
-            msg = 'No form defined'
-            raise ImproperlyConfigured(msg)
-
+        self.must_have_form()
         self.request = request
         self.validate_edit_data()
         form = self.fill_form()
@@ -347,6 +360,11 @@ class JqGrid(object):
                 return_data = {'ok': True, 'id': entry.id }
 
         return json.dumps(return_data)
+    
+    def must_have_form(self):
+        if self.form is None:
+            msg = 'No form defined'
+            raise ImproperlyConfigured(msg)
 
     def validate_edit_data(self):
         request = self.request
