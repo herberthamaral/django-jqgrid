@@ -50,6 +50,7 @@ class JqGrid(object):
 
     pager_id = '#pager'
     url = None
+    edit_url = None
     caption = None
     colmodel_overrides = {}
     request = None
@@ -229,6 +230,7 @@ class JqGrid(object):
             'altRows': True,
             'gridview': True,
             'height': 'auto',
+            'editurl': '' if self.edit_url is None else self.edit_url
             #'multikey': 'ctrlKey',
             #'multiboxonly': True,
             #'multiselect': True,
