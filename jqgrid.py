@@ -27,6 +27,7 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
 # POSSIBILITY OF SUCH DAMAGE.
 
+import copy
 import operator
 from django.db import models
 from django.core.exceptions import FieldError, ImproperlyConfigured,\
@@ -83,6 +84,7 @@ class JqGrid(object):
         items = self.get_queryset()
         items = self.filter_items(items)
         items = self.sort_items(items)
+        items = self.check_for_foreign_keys(items)
         paginator, page, items = self.paginate_items(items)
         return (paginator, page, items)
 
@@ -160,7 +162,21 @@ class JqGrid(object):
             filters = reduce(operator.ior, q_filters)
         else:
             filters = reduce(operator.iand, q_filters)
-        return items.filter(filters)
+        items = items.filter(filters)
+        return items
+
+    def check_for_foreign_keys(self, items):
+        fields = self.get_model()._meta.fields
+        fields_with_fk = []
+        for field in fields:
+            if issubclass(field.__class__, models.ForeignKey):
+                fields_with_fk.append(field)
+        for item in items:
+            for field in fields_with_fk:
+                field_manager = field.rel.to.objects
+                id = item[field.name]
+                item[field.name] = unicode(field_manager.filter(id = id)[0])
+        return items
 
     def sort_items(self, items):
         request = self.request
@@ -309,6 +325,7 @@ class JqGrid(object):
             colmodel['edittype'] = widget_equivalence_table[field]
             colmodel['editoptions'] = widget.attrs
             self.get_editoptions_from_field(colmodel, field_name)
+            self.get_editrules_from_field(colmodel, field_name)
         except KeyError:
             colmodel['edittype'] = 'text'
 
@@ -328,6 +345,7 @@ class JqGrid(object):
 
         if colmodel['editoptions']['value'] == {}:
             del colmodel['editoptions']['value']
+
 
     def get_field_names(self):
         fields = self.fields
@@ -388,17 +406,23 @@ class JqGrid(object):
             self.entry = entry[0]
 
     def fill_form(self):
-        data = self.request.POST
+        data = dict(copy.deepcopy(self.request.POST))
         if self.is_edit_op:
             obj_id = self.request.POST['id']
             entry = self.entry
             for field in self.get_field_names():
                 if field not in data:
                     data[field] = getattr(entry, field)
+                    if issubclass(data[field].__class__, models.Model):
+                        #for foreign keys: it should fill the form
+                        #with the foreign key id, not the object
+                        data[field] = data[field].id
             form = self.form(data, instance = entry)
         else:
             form = self.form(data)
         return form
+    def get_editrules_from_field(self, arg1, arg2):
+        pass
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):

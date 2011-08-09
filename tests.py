@@ -19,6 +19,9 @@ class Book(models.Model):
 class BookShelf(models.Model):
     location = models.CharField(max_length = 60)
 
+    def __unicode__(self):
+        return self.location
+
 #forms
 class LibraryUserForm(ModelForm):
     class Meta:
@@ -49,6 +52,18 @@ class JqGridTest(TestCase):
         filters = self.jqgrid.get_filters()
         self.assertNotEquals(0,filters['rules'].__len__())
 
+    def test_it_should_get_str_from_foreign_keys_instead_of_ids(self):
+        self.request.GET = {'_search': 'false',
+                'rows':'10',
+                'page':'1',
+                'sidx':'id',
+                'sord':'asc'}
+        self.jqgrid.model = Book
+        self.jqgrid.form = BookForm
+        self.create_some_books()
+        response = json.loads(self.jqgrid.get_json(self.request))
+        self.assertEquals('end of hall', response['rows'][0]['on_shelf'])
+        self.assertEquals('begin of hall', response['rows'][1]['on_shelf'])
 
     def test_it_should_not_handle_get_requests_in_edit(self):
         """JqGrid sends insert, edit and delete via post requests"""
@@ -158,6 +173,21 @@ class JqGridTest(TestCase):
         user2 = LibraryUser.objects.filter(id = 2)
         self.assertEquals(0, len(user2))
 
+    def test_fill_form_should_fill_foreign_keys_fields_with_ints(self):
+        self.create_some_books()
+        self.request.method = 'POST'
+        self.request.POST = {
+                'oper': 'post',
+                'id':'2',
+                }
+        self.jqgrid.model = Book 
+        self.jqgrid.form = BookForm
+        self.jqgrid.entry = Book.objects.filter(id=2)[0]
+        self.jqgrid.is_edit_op = True
+        self.jqgrid.request = self.request
+        form = self.jqgrid.fill_form()
+        self.assertEquals(2, form.data['on_shelf'])
+
     def test_it_should_not_make_the_ids_editable_by_default(self):
         self.setup_default_get()
         config = json.loads(self.jqgrid.get_config(self.request))
@@ -173,10 +203,7 @@ class JqGridTest(TestCase):
 
     def test_it_should_return_a_list_of_options_for_foreignkey_fields(self):
         self.setup_default_get()
-        shelf1 = BookShelf.objects.create(location='end of hall')
-        shelf2 = BookShelf.objects.create(location='begin of hall')
-        book1 = Book.objects.create(on_shelf=shelf1, title='book1')
-        book2 = Book.objects.create(on_shelf=shelf2, title='book2')
+        self.create_some_books()
         self.jqgrid.form = BookForm
         self.jqgrid.model = Book 
         config = json.loads(self.jqgrid.get_config(self.request))
@@ -188,5 +215,11 @@ class JqGridTest(TestCase):
         self.request.GET = {}
         self.jqgrid.form = LibraryUserForm
         self.jqgrid.model = LibraryUser
+
+    def create_some_books(self):
+        shelf1 = BookShelf.objects.create(location='end of hall')
+        shelf2 = BookShelf.objects.create(location='begin of hall')
+        book1 = Book.objects.create(on_shelf=shelf1, title='book1')
+        book2 = Book.objects.create(on_shelf=shelf2, title='book2')
 
 
